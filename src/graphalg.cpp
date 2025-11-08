@@ -33,7 +33,7 @@ Graphalg::Graphalg(
 
     for (int i = 0 ; i < edges.size() ; i++) {
         CH::Edge e(edges[i][0], edges[i][1], i,
-            edgeweights[i]*DISTANCEMULTFACT, true, twoway);
+            static_cast<unsigned int>(round(edgeweights[i]*DISTANCEMULTFACT)), true, twoway);
         ev.push_back(e);
     }
 

@@ -307,6 +307,61 @@ def test_shortest_path_lengths(sample_osm):
         pass
 
 
+def test_shortest_path_length_precision():
+    """
+    Test that shortest_path_lengths uses rounding instead of truncation
+    when converting edge weights to integers, reducing precision loss.
+    
+    This test addresses the bug where shortest_path_lengths gave different 
+    results than computing the length from shortest_paths due to truncation
+    of edge weights (multiplied by 1000 for internal integer representation).
+    
+    With rounding, the maximum error per edge is 0.0005 (half of 0.001).
+    With truncation, it was up to 0.001 per edge.
+    """
+    # Create a simple test network with non-integer edge weights
+    nodes = pd.DataFrame({
+        'x': [0.0, 1.0, 2.0, 3.0],
+        'y': [0.0, 0.0, 0.0, 0.0]
+    }, index=[1, 2, 3, 4])
+    
+    # Use edge weights that demonstrate the difference between rounding and truncation
+    # 0.9999 * 1000 = 999.9, which truncates to 999 but rounds to 1000
+    edges = pd.DataFrame({
+        'from': [1, 2, 3],
+        'to': [2, 3, 4],
+        'weight': [0.9999, 1.5005, 2.3007]
+    })
+    
+    net = pdna.Network(nodes.x, nodes.y, edges['from'], edges.to, 
+                       edges[['weight']], twoway=False)
+    
+    # Test single query
+    path = net.shortest_path(1, 4)
+    reported_length = net.shortest_path_length(1, 4)
+    actual_sum = sum(edges['weight'])
+    
+    # With rounding: (1000 + 1501 + 2301) / 1000 = 4.802
+    # With truncation: (999 + 1500 + 2300) / 1000 = 4.799
+    # Actual sum: 0.9999 + 1.5005 + 2.3007 = 4.8011
+    
+    # The reported length should be closer to actual with rounding
+    error = abs(reported_length - actual_sum)
+    
+    # Maximum expected error with rounding: 0.0005 per edge * 3 edges = 0.0015
+    # Add small tolerance for floating point comparison
+    assert error <= 0.002, f"Error {error} exceeds expected maximum with rounding"
+    
+    # Verify rounding is used (reported ≈ 4.802) not truncation (reported ≈ 4.799)
+    assert abs(reported_length - 4.802) < 0.001, \
+        f"Expected rounding behavior (≈4.802), got {reported_length}"
+    
+    # Test vectorized version
+    vec_lengths = net.shortest_path_lengths([1], [4])
+    assert abs(vec_lengths[0] - reported_length) < 0.0001, \
+        "Vectorized version should give same result as single query"
+
+
 def test_pois(sample_osm):
     net = sample_osm
 
