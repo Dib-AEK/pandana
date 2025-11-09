@@ -362,6 +362,97 @@ def test_shortest_path_length_precision():
         "Vectorized version should give same result as single query"
 
 
+def test_shortest_path_extreme_impedances():
+    """
+    Test that shortest path calculations work correctly with very small 
+    and very large impedance values.
+    
+    This addresses the bug where impedance values outside a certain range
+    (too small ~<1e-4 or too large ~>1e7) would cause incorrect shortest
+    path solutions due to:
+    1. Small values rounding to zero after multiplication
+    2. Large values overflowing unsigned int after multiplication
+    """
+    # Create a simple network with two alternative paths
+    nodes = pd.DataFrame({
+        'x': [0.0, 1.0, 2.0, 3.0, 4.0],
+        'y': [0.0, 0.0, 0.0, 0.0, 0.0]
+    }, index=[1, 2, 3, 4, 5])
+    
+    # Path 1->2->3->4 has total weight 0.003 (3 edges @ 0.001 each)
+    # Path 1->5->4 has total weight 0.004 (2 edges @ 0.002 each)
+    # The correct shortest path should be 1->2->3->4
+    edges = pd.DataFrame({
+        'from': [1, 2, 3, 1, 5],
+        'to': [2, 3, 4, 5, 4],
+        'weight': [0.001, 0.001, 0.001, 0.002, 0.002]
+    })
+    
+    # Test 1: Original weights - should work correctly
+    net = pdna.Network(nodes.x, nodes.y, edges['from'], edges.to, 
+                       edges[['weight']], twoway=False)
+    path = net.shortest_path(1, 4)
+    assert list(path) == [1, 2, 3, 4], \
+        f"Expected path [1, 2, 3, 4] with original weights, got {list(path)}"
+    
+    # Test 2: Small weights (scaled down by 10) - this was broken before
+    edges_small = edges.copy()
+    edges_small['weight'] = edges['weight'] / 10
+    net_small = pdna.Network(nodes.x, nodes.y, edges_small['from'], 
+                             edges_small.to, edges_small[['weight']], twoway=False)
+    path_small = net_small.shortest_path(1, 4)
+    assert list(path_small) == [1, 2, 3, 4], \
+        f"Expected path [1, 2, 3, 4] with small weights (0.0001-0.0002), got {list(path_small)}"
+    
+    # Verify the path length is also correct
+    length_small = net_small.shortest_path_length(1, 4)
+    expected_length_small = 0.0001 + 0.0001 + 0.0001  # 0.0003
+    assert abs(length_small - expected_length_small) < 0.00001, \
+        f"Expected length ~{expected_length_small} with small weights, got {length_small}"
+    
+    # Test 3: Very small weights (scaled down by 100) - even more extreme
+    edges_tiny = edges.copy()
+    edges_tiny['weight'] = edges['weight'] / 100
+    net_tiny = pdna.Network(nodes.x, nodes.y, edges_tiny['from'], 
+                            edges_tiny.to, edges_tiny[['weight']], twoway=False)
+    path_tiny = net_tiny.shortest_path(1, 4)
+    assert list(path_tiny) == [1, 2, 3, 4], \
+        f"Expected path [1, 2, 3, 4] with very small weights (0.00001-0.00002), got {list(path_tiny)}"
+    
+    # Test 4: Large weights (scaled up significantly) - this was also broken before
+    edges_large = edges.copy()
+    edges_large['weight'] = edges['weight'] * 1e7
+    net_large = pdna.Network(nodes.x, nodes.y, edges_large['from'], 
+                             edges_large.to, edges_large[['weight']], twoway=False)
+    path_large = net_large.shortest_path(1, 4)
+    assert list(path_large) == [1, 2, 3, 4], \
+        f"Expected path [1, 2, 3, 4] with large weights (1e4-2e4), got {list(path_large)}"
+    
+    # Verify the path length is also correct for large weights
+    length_large = net_large.shortest_path_length(1, 4)
+    expected_length_large = 1e4 + 1e4 + 1e4  # 3e4
+    assert abs(length_large - expected_length_large) / expected_length_large < 0.01, \
+        f"Expected length ~{expected_length_large} with large weights, got {length_large}"
+    
+    # Test 5: Very large weights (even more extreme)
+    edges_huge = edges.copy()
+    edges_huge['weight'] = edges['weight'] * 1e8
+    net_huge = pdna.Network(nodes.x, nodes.y, edges_huge['from'], 
+                            edges_huge.to, edges_huge[['weight']], twoway=False)
+    path_huge = net_huge.shortest_path(1, 4)
+    assert list(path_huge) == [1, 2, 3, 4], \
+        f"Expected path [1, 2, 3, 4] with very large weights (1e5-2e5), got {list(path_huge)}"
+    
+    # Test 6: Test vectorized versions with small weights
+    paths_vec = net_small.shortest_paths([1], [4])
+    assert list(paths_vec[0]) == [1, 2, 3, 4], \
+        f"Expected path [1, 2, 3, 4] with vectorized call, got {list(paths_vec[0])}"
+    
+    lengths_vec = net_small.shortest_path_lengths([1], [4])
+    assert abs(lengths_vec[0] - expected_length_small) < 0.00001, \
+        f"Expected length ~{expected_length_small} with vectorized call, got {lengths_vec[0]}"
+
+
 def test_pois(sample_osm):
     net = sample_osm
 
