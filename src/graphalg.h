@@ -8,8 +8,6 @@
 
 typedef unsigned int NodeID;
 
-#define DISTANCEMULTFACT 1000.0
-
 namespace MTC {
 namespace accessibility {
 
@@ -40,10 +38,11 @@ class Graphalg {
     }
 
     void initPOIIndex(const POIKeyType &category, double maxdist, int maxitems) {
-        ch.createPOIIndex(category, maxdist*DISTANCEMULTFACT, maxitems);
+        ch.createPOIIndex(category, maxdist*distanceMultFact, maxitems);
     }
 
     int numnodes;
+    double distanceMultFact;
     CH::ContractionHierarchies ch;
 };
 }  // namespace accessibility

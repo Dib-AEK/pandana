@@ -1,5 +1,7 @@
 #include "graphalg.h"
 #include <math.h>
+#include <algorithm>
+#include <limits>
 
 namespace MTC {
 namespace accessibility {
@@ -29,11 +31,45 @@ Graphalg::Graphalg(
 	
     ch.SetNodeVector(nv);
 
+    // Calculate dynamic multiplier based on edge weight range
+    // to avoid overflow with large weights and zero weights with small values
+    double minWeight = std::numeric_limits<double>::max();
+    double maxWeight = 0.0;
+    
+    for (int i = 0; i < edgeweights.size(); i++) {
+        if (edgeweights[i] > 0) {  // Only consider positive weights
+            minWeight = std::min(minWeight, edgeweights[i]);
+            maxWeight = std::max(maxWeight, edgeweights[i]);
+        }
+    }
+    
+    // Handle edge case where all weights are zero or negative
+    if (minWeight == std::numeric_limits<double>::max() || maxWeight == 0.0) {
+        distanceMultFact = 1000.0;  // Default multiplier
+    } else {
+        // Calculate multiplier to ensure:
+        // 1. Minimum weight * multiplier >= 1 (to avoid rounding to zero)
+        // 2. Maximum weight * multiplier < UINT_MAX (to avoid overflow)
+        const double UINT_MAX_SAFE = static_cast<double>(std::numeric_limits<unsigned int>::max()) * 0.9;  // 90% of UINT_MAX for safety
+        
+        double multForMin = 1.0 / minWeight;  // To make minimum weight at least 1
+        double multForMax = UINT_MAX_SAFE / maxWeight;  // To avoid overflow
+        
+        // Use the smaller of the two to satisfy both constraints
+        distanceMultFact = std::min(multForMin, multForMax);
+        
+        // Ensure multiplier is at least 1.0 to maintain some precision
+        distanceMultFact = std::max(distanceMultFact, 1.0);
+    }
+    
+    FILE_LOG(logINFO) << "Using distance multiplier: " << distanceMultFact 
+                      << " (min weight: " << minWeight << ", max weight: " << maxWeight << ")\n";
+
     vector<CH::Edge> ev;
 
     for (int i = 0 ; i < edges.size() ; i++) {
         CH::Edge e(edges[i][0], edges[i][1], i,
-            static_cast<unsigned int>(round(edgeweights[i]*DISTANCEMULTFACT)), true, twoway);
+            static_cast<unsigned int>(round(edgeweights[i]*distanceMultFact)), true, twoway);
         ev.push_back(e);
     }
 
@@ -70,7 +106,7 @@ double Graphalg::Distance(int src, int tgt, int threadNum) {
         tgt_node,
         threadNum);
 
-    return static_cast<double>(length) / static_cast<double>(DISTANCEMULTFACT);
+    return static_cast<double>(length) / distanceMultFact;
 }
 
 
@@ -82,14 +118,14 @@ void Graphalg::Range(int src, double maxdist, int threadNum,
 
     ch.computeReachableNodesWithin(
         src_node,
-        maxdist*DISTANCEMULTFACT,
+        maxdist*distanceMultFact,
         tmp,
         threadNum);
 
     for (int i = 0 ; i < tmp.size() ; i++) {
         std::pair<NodeID, float> node;
         node.first = tmp[i].first;
-        node.second = tmp[i].second/DISTANCEMULTFACT;
+        node.second = tmp[i].second/distanceMultFact;
         ResultingNodes.push_back(node);
     }
 }
@@ -104,15 +140,14 @@ Graphalg::NearestPOI(const POIKeyType &category, int src, double maxdist, int nu
     ch.getNearestWithUpperBoundOnDistanceAndLocations(
         category,
         src,
-        maxdist*DISTANCEMULTFACT,
+        maxdist*distanceMultFact,
         number,
         ResultingNodes,
         threadNum);
 
     for (int i = 0 ; i < ResultingNodes.size() ; i++) {
         dm[ResultingNodes[i].node] =
-            static_cast<float>(ResultingNodes[i].distance) /
-            static_cast<float>(DISTANCEMULTFACT);
+            static_cast<float>(ResultingNodes[i].distance) / distanceMultFact;
     }
 
     return dm;
